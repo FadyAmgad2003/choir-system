@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { UserRole, UserAccount, Organization, Church, ChoirDepartment, Member, AttendanceEvent } from '../types';
 import { INITIAL_ORGANIZATIONS, INITIAL_CHURCHES, INITIAL_CHOIRS, INITIAL_MEMBERS, INITIAL_EVENTS, TRANSLATIONS, AppLanguage } from '../data';
 import { getSupabaseClient, getSupabaseCredentials, resetSupabaseClient, isSupabaseConfigured, cleanSupabaseUrl } from '../supabaseClient';
@@ -12,14 +12,14 @@ interface AppContextType {
   // Network Offline Emulation
   isOnline: boolean;
   setIsOnline: (status: boolean) => void;
-  offlineQueue: string[]; // pending scanned QR codes
+  offlineQueue: string[];
   syncOfflineQueue: () => void;
 
   // Active User / Access Session
   currentUser: UserAccount | null;
   switchRole: (role: UserRole) => void;
-  login: (email: string, pass: string) => { success: boolean; message: string };
-  logout: () => void;
+  login: (email: string, pass: string) => Promise<{ success: boolean; message: string }>;
+  logout: () => Promise<void>;
 
   // Core Data Lists
   organizations: Organization[];
@@ -78,6 +78,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     setLanguage(language);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const t = TRANSLATIONS[language];
@@ -99,12 +100,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // 3. Dynamic Supabase Connection State and Config hooks
-  const [supabaseUrl, setSupabaseUrl] = useState<string>(() => {
-    return getSupabaseCredentials().url;
-  });
-  const [supabaseAnonKey, setSupabaseAnonKey] = useState<string>(() => {
-    return getSupabaseCredentials().key;
-  });
+  const [supabaseUrl, setSupabaseUrl] = useState<string>(() => getSupabaseCredentials().url);
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState<string>(() => getSupabaseCredentials().key);
   const [isSupabaseConnected, setIsSupabaseConnected] = useState<boolean>(false);
   const [supabaseError, setSupabaseError] = useState<string | null>(null);
   const [syncTrigger, setSyncTrigger] = useState<number>(0);
@@ -127,11 +124,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     resetSupabaseClient();
     setIsSupabaseConnected(false);
     setSupabaseError(null);
-    // Trigger real-time synchronization re-run
     setSyncTrigger(prev => prev + 1);
   };
 
-  // 4. User Accounts State (Super Admin and normal screens interact with)
+  // 4. User Accounts State
   const [admins, setAdmins] = useState<UserAccount[]>(() => {
     const cached = localStorage.getItem('cams_admins');
     if (cached) return JSON.parse(cached);
@@ -144,46 +140,119 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ];
   });
 
-  // Current session representation (null means logged out)
+  // Keep a ref to admins for use inside auth callbacks without stale closure
+  const adminsRef = useRef<UserAccount[]>(admins);
+  useEffect(() => { adminsRef.current = admins; }, [admins]);
+
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
     const cached = localStorage.getItem('cams_session');
     if (cached) return JSON.parse(cached);
     return null;
   });
 
-  const switchRole = (role: UserRole) => {
-    let account: UserAccount;
-    const defaultAdmins = [
-      { id: 'usr-super', name: 'His Eminence Bishop Anba Antonios', email: 'superadmin@church.org', role: 'super_admin', password: 'super', status: 'active' },
-      { id: 'usr-admin1', name: 'Mina Shawky', email: 'fadyamgd126@gmail.com', role: 'admin', password: 'admin', organizationId: 'org-stmary', status: 'active' },
-      { id: 'usr-admin-user', name: 'Maan N.', email: 'maannddrr@gmail.com', role: 'admin', password: 'admin', organizationId: 'org-stmary', status: 'active' },
-      { id: 'usr-admin2', name: 'Eng. Amgad Adly', email: 'amgad@churchdiocese.org', role: 'admin', password: 'admin', organizationId: 'org-stmary', status: 'active' },
-      { id: 'usr-officer1', name: 'Peter Mansour', email: 'peter.m@diocesestaff.org', role: 'officer', password: 'officer', organizationId: 'org-stmary', choirId: 'sub-stmary-choir1', status: 'active' }
-    ];
+  // ─── SUPABASE AUTH ────────────────────────────────────────────────────────
 
-    const allAdmins = [...admins];
-    defaultAdmins.forEach(def => {
-      if (!allAdmins.some(a => a.email.toLowerCase() === def.email.toLowerCase())) {
-        allAdmins.push(def as any);
-      }
-    });
-
-    if (role === 'super_admin') {
-      account = allAdmins.find(a => a.role === 'super_admin') || (defaultAdmins[0] as any);
-    } else if (role === 'admin') {
-      account = allAdmins.find(a => a.role === 'admin') || (defaultAdmins[2] as any);
-    } else {
-      account = allAdmins.find(a => a.role === 'officer') || (defaultAdmins[4] as any);
-    }
-    setCurrentUser(account);
-    localStorage.setItem('cams_session', JSON.stringify(account));
+  /**
+   * Resolves a Supabase Auth user to a matching UserAccount row from the
+   * `admins` table (or local fallback list), enriching it with profile data.
+   */
+  const resolveUserAccount = (authEmail: string, authId: string): UserAccount | null => {
+    const all = adminsRef.current;
+    const match = all.find(a => a.email.toLowerCase() === authEmail.toLowerCase());
+    if (!match) return null;
+    // Prefer the DB id but keep the local profile fields
+    return { ...match, id: match.id || authId };
   };
 
-  const login = (email: string, pass: string) => {
+  // Subscribe to Supabase Auth session changes once on mount
+  useEffect(() => {
+    const client = getSupabaseClient() as any;
+    if (!client) return;
+
+    // Restore any existing session on load
+    (async () => {
+      const { data: { session } } = await client.auth.getSession();
+      if (session?.user) {
+        const account = resolveUserAccount(session.user.email ?? '', session.user.id);
+        if (account) {
+          setCurrentUser(account);
+          localStorage.setItem('cams_session', JSON.stringify(account));
+        }
+      }
+    })();
+
+    // Listen for future sign-in / sign-out events
+    const { data: { subscription } } = client.auth.onAuthStateChange(
+      (_event: string, session: any) => {
+        if (session?.user) {
+          const account = resolveUserAccount(session.user.email ?? '', session.user.id);
+          if (account) {
+            setCurrentUser(account);
+            localStorage.setItem('cams_session', JSON.stringify(account));
+          }
+        } else {
+          setCurrentUser(null);
+          localStorage.removeItem('cams_session');
+        }
+      }
+    );
+
+    return () => { subscription?.unsubscribe(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncTrigger]);
+
+  // ── login: Supabase Auth first, local-list fallback ──────────────────────
+  const login = async (email: string, pass: string): Promise<{ success: boolean; message: string }> => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPass = pass.trim();
 
-    const defaultAdmins = [
+    const client = getSupabaseClient() as any;
+
+    if (client) {
+      // --- Try Supabase Auth ---
+      const { data, error } = await client.auth.signInWithPassword({
+        email: cleanEmail,
+        password: cleanPass,
+      });
+
+      if (!error && data?.user) {
+        // Auth succeeded — resolveUserAccount will be called by onAuthStateChange.
+        // But also resolve immediately in case listener fires late.
+        const account = resolveUserAccount(data.user.email ?? cleanEmail, data.user.id);
+        if (account) {
+          if (account.status === 'inactive') {
+            // Sign back out so Supabase session is not persisted
+            await client.auth.signOut();
+            return {
+              success: false,
+              message: language === 'ar'
+                ? 'هذا الحساب غير نشط حالياً.'
+                : 'This account is currently marked inactive.'
+            };
+          }
+          setCurrentUser(account);
+          localStorage.setItem('cams_session', JSON.stringify(account));
+          return {
+            success: true,
+            message: language === 'ar' ? 'تم تسجيل الدخول بنجاح!' : 'Successfully signed in!'
+          };
+        }
+
+        // Supabase user exists but has no matching admins row yet
+        return {
+          success: false,
+          message: language === 'ar'
+            ? 'تم التحقق من الهوية ولكن لا يوجد ملف تعريفي مرتبط. يرجى التواصل مع المشرف.'
+            : 'Authenticated but no linked profile found. Please contact the administrator.'
+        };
+      }
+
+      // Fall through to local credentials check if Supabase Auth is unavailable or fails to find auth record
+      console.warn('Supabase Auth failed or unavailable, checking local credentials list:', error?.message);
+    }
+
+    // --- Local-list fallback (offline / Supabase not configured) ---
+    const defaultAdmins: UserAccount[] = [
       { id: 'usr-super', name: 'His Eminence Bishop Anba Antonios', email: 'superadmin@church.org', role: 'super_admin', password: 'super', status: 'active' },
       { id: 'usr-admin1', name: 'Mina Shawky', email: 'fadyamgd126@gmail.com', role: 'admin', password: 'admin', organizationId: 'org-stmary', status: 'active' },
       { id: 'usr-admin-user', name: 'Maan N.', email: 'maannddrr@gmail.com', role: 'admin', password: 'admin', organizationId: 'org-stmary', status: 'active' },
@@ -217,9 +286,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: false, message: language === 'ar' ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' : 'Invalid email or password.' };
   };
 
-  const logout = () => {
+  // ── logout: Supabase Auth sign-out + local clear ──────────────────────────
+  const logout = async (): Promise<void> => {
+    const client = getSupabaseClient() as any;
+    if (client) {
+      await client.auth.signOut().catch((err: any) => {
+        console.warn('Supabase signOut error (continuing anyway):', err?.message);
+      });
+    }
     setCurrentUser(null);
     localStorage.removeItem('cams_session');
+  };
+
+  // ── switchRole: kept for dev convenience (no Supabase Auth call) ──────────
+  const switchRole = (role: UserRole) => {
+    const defaultAdmins: UserAccount[] = [
+      { id: 'usr-super', name: 'His Eminence Bishop Anba Antonios', email: 'superadmin@church.org', role: 'super_admin', password: 'super', status: 'active' },
+      { id: 'usr-admin1', name: 'Mina Shawky', email: 'fadyamgd126@gmail.com', role: 'admin', password: 'admin', organizationId: 'org-stmary', status: 'active' },
+      { id: 'usr-admin-user', name: 'Maan N.', email: 'maannddrr@gmail.com', role: 'admin', password: 'admin', organizationId: 'org-stmary', status: 'active' },
+      { id: 'usr-admin2', name: 'Eng. Amgad Adly', email: 'amgad@churchdiocese.org', role: 'admin', password: 'admin', organizationId: 'org-stmary', status: 'active' },
+      { id: 'usr-officer1', name: 'Peter Mansour', email: 'peter.m@diocesestaff.org', role: 'officer', password: 'officer', organizationId: 'org-stmary', choirId: 'sub-stmary-choir1', status: 'active' }
+    ];
+
+    const allAdmins = [...admins];
+    defaultAdmins.forEach(def => {
+      if (!allAdmins.some(a => a.email.toLowerCase() === def.email.toLowerCase())) {
+        allAdmins.push(def as any);
+      }
+    });
+
+    let account: UserAccount;
+    if (role === 'super_admin') {
+      account = allAdmins.find(a => a.role === 'super_admin') || (defaultAdmins[0] as any);
+    } else if (role === 'admin') {
+      account = allAdmins.find(a => a.role === 'admin') || (defaultAdmins[2] as any);
+    } else {
+      account = allAdmins.find(a => a.role === 'officer') || (defaultAdmins[4] as any);
+    }
+    setCurrentUser(account);
+    localStorage.setItem('cams_session', JSON.stringify(account));
   };
 
   // 5. Church Settings Config
@@ -238,6 +343,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       Promise.resolve(client.from('settings').upsert({ id: 'config', orgName: name, logoUrl })).catch(console.error);
     }
   };
+
   const setLogoUrl = (url: string) => {
     setLogoUrlState(url);
     localStorage.setItem('cams_logo_url', url);
@@ -277,10 +383,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const seedSupabaseIfEmpty = async (client: any) => {
     try {
       console.log('Seeding Supabase with initial demo data...');
-      
+
       const { data: adminCheck } = await client.from('admins').select('id').limit(1);
       if (!adminCheck || adminCheck.length === 0) {
-        // 1. Seed admins
         const initialAdmins = [
           { id: 'usr-super', name: 'His Eminence Bishop Anba Antonios', email: 'superadmin@church.org', role: 'super_admin', password: 'super', status: 'active' },
           { id: 'usr-admin1', name: 'Mina Shawky', email: 'fadyamgd126@gmail.com', role: 'admin', password: 'admin', organizationId: 'org-stmary', status: 'active' },
@@ -289,29 +394,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           { id: 'usr-officer1', name: 'Peter Mansour', email: 'peter.m@diocesestaff.org', role: 'officer', password: 'officer', organizationId: 'org-stmary', choirId: 'sub-stmary-choir1', status: 'active' }
         ];
         await Promise.resolve(client.from('admins').upsert(initialAdmins)).catch(console.error);
-
-        // 2. Seed organizations
         await Promise.resolve(client.from('organizations').upsert(INITIAL_ORGANIZATIONS)).catch(console.error);
-
-        // 3. Seed churches
         await Promise.resolve(client.from('churches').upsert(INITIAL_CHURCHES)).catch(console.error);
-
-        // 4. Seed choirs
         await Promise.resolve(client.from('choirs').upsert(INITIAL_CHOIRS)).catch(console.error);
-
-        // 5. Seed members
         await Promise.resolve(client.from('members').upsert(INITIAL_MEMBERS)).catch(console.error);
-
-        // 6. Seed events
         await Promise.resolve(client.from('events').upsert(INITIAL_EVENTS)).catch(console.error);
-
-        // 7. Seed Settings config
         await Promise.resolve(client.from('settings').upsert({
           id: 'config',
           orgName: 'St. Mary of Angels Diocese',
           logoUrl: 'https://images.unsplash.com/photo-1548625361-155de0cbb565?w=150&q=80'
         })).catch(console.error);
-
         console.log('Supabase demo data seeded successfully!');
       }
     } catch (err) {
@@ -323,12 +415,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       setSupabaseError(null);
 
-      // Perform a clean connection test
       const { data: testData, error: testError } = await client.from('settings').select('id').limit(1) as any;
       if (testError) {
         console.error('Supabase test select error:', testError);
         if (testError.code === '42P01') {
-          // Tables do not exist!
           setSupabaseError(language === 'ar'
             ? 'خطأ: جداول قاعدة البيانات غير موجودة! يرجى أولاً نسخ رمز الـ SQL من لوحة الإعدادات وتأكيد تشغيله (SQL Editor) داخل Supabase.'
             : 'Error: Database tables not found! Please copy the SQL setup code under settings, paste it in Supabase SQL Editor and hit Run.');
@@ -343,7 +433,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
-      // 1. Fetch settings config first
       const { data: settingsData, error: settingsError } = await client.from('settings').select('*').eq('id', 'config').maybeSingle() as any;
       if (!settingsError && settingsData) {
         if (settingsData.orgName) {
@@ -356,12 +445,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      // 2. Fetch admins
       const { data: adminsData, error: adminsError } = await client.from('admins').select('*') as any;
       if (!adminsError && adminsData) {
         if (adminsData.length === 0) {
           await seedSupabaseIfEmpty(client);
-          // Refetch admins
           const { data: refetchedAdmins } = await client.from('admins').select('*') as any;
           if (refetchedAdmins) setAdmins(refetchedAdmins);
         } else {
@@ -370,28 +457,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      // 3. Fetch organizations
       const { data: orgsData, error: orgsError } = await client.from('organizations').select('*') as any;
       if (!orgsError && orgsData) {
         setOrganizations(orgsData);
         localStorage.setItem('cams_orgs', JSON.stringify(orgsData));
       }
 
-      // 4. Fetch churches
       const { data: churchesData, error: churchesError } = await client.from('churches').select('*') as any;
       if (!churchesError && churchesData) {
         setChurches(churchesData);
         localStorage.setItem('cams_churches', JSON.stringify(churchesData));
       }
 
-      // 5. Fetch choirs
       const { data: choirsData, error: choirsError } = await client.from('choirs').select('*') as any;
       if (!choirsError && choirsData) {
         setChoirs(choirsData);
         localStorage.setItem('cams_choirs', JSON.stringify(choirsData));
       }
 
-      // 6. Fetch members
       const { data: membersData, error: membersError } = await client.from('members').select('*') as any;
       if (!membersError && membersData) {
         const sorted = [...membersData].sort((a, b) => b.id.localeCompare(a.id));
@@ -399,7 +482,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         localStorage.setItem('cams_members', JSON.stringify(sorted));
       }
 
-      // 7. Fetch events
       const { data: eventsData, error: eventsError } = await client.from('events').select('*') as any;
       if (!eventsError && eventsData) {
         const sorted = [...eventsData].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
@@ -407,7 +489,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         localStorage.setItem('cams_events', JSON.stringify(sorted));
       }
 
-      // Connection is fully successful
       setSupabaseError(null);
       setIsSupabaseConnected(true);
     } catch (err: any) {
@@ -433,10 +514,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    // Load initial data
     fetchInitialData(client);
 
-    // Dynamic state synchronizer listening instantly to remote database modifications
     const channel = client
       .channel('cams-supabase-pubsub')
       // Admins Sync
@@ -542,29 +621,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => {
       client.removeChannel(channel);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncTrigger]);
 
   // Keep local backups stored up to date
-  useEffect(() => {
-    localStorage.setItem('cams_admins', JSON.stringify(admins));
-  }, [admins]);
-  useEffect(() => {
-    localStorage.setItem('cams_orgs', JSON.stringify(organizations));
-  }, [organizations]);
-  useEffect(() => {
-    localStorage.setItem('cams_churches', JSON.stringify(churches));
-  }, [churches]);
-  useEffect(() => {
-    localStorage.setItem('cams_choirs', JSON.stringify(choirs));
-  }, [choirs]);
-  useEffect(() => {
-    localStorage.setItem('cams_members', JSON.stringify(members));
-  }, [members]);
-  useEffect(() => {
-    localStorage.setItem('cams_events', JSON.stringify(events));
-  }, [events]);
+  useEffect(() => { localStorage.setItem('cams_admins', JSON.stringify(admins)); }, [admins]);
+  useEffect(() => { localStorage.setItem('cams_orgs', JSON.stringify(organizations)); }, [organizations]);
+  useEffect(() => { localStorage.setItem('cams_churches', JSON.stringify(churches)); }, [churches]);
+  useEffect(() => { localStorage.setItem('cams_choirs', JSON.stringify(choirs)); }, [choirs]);
+  useEffect(() => { localStorage.setItem('cams_members', JSON.stringify(members)); }, [members]);
+  useEffect(() => { localStorage.setItem('cams_events', JSON.stringify(events)); }, [events]);
 
-  // Reactive pruning: If members are deleted/cleared, automatically clean up their corresponding attendance logs
+  // Reactive pruning: If members are deleted/cleared, automatically clean up attendance logs
   useEffect(() => {
     const existingCodes = new Set(members.map(m => m.memberCode));
     const staleEvents = events.filter(e => !existingCodes.has(e.memberCode));
@@ -576,6 +644,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         Promise.resolve(client.from('events').delete().in('id', staleIds)).catch(console.error);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [members]);
 
   useEffect(() => {
@@ -587,6 +656,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isOnline && offlineQueue.length > 0) {
       syncOfflineQueue();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline]);
 
   // 8. Action: Add Member Profile
@@ -603,7 +673,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status: 'Active'
     };
 
-    // Optimistic Update
     setMembers(prev => [newMember, ...prev]);
 
     const client = getSupabaseClient() as any;
@@ -617,9 +686,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateMember = (updated: Member) => {
-    // Optimistic Update
     setMembers(prev => prev.map(m => m.id === updated.id ? updated : m));
-
     const client = getSupabaseClient() as any;
     if (client) {
       Promise.resolve(client.from('members').upsert([updated])).catch((err: any) => {
@@ -630,8 +697,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteMembers = (ids: string[]) => {
     const codesToDelete = members.filter(m => ids.includes(m.id)).map(m => m.memberCode);
-    
-    // Optimistic Update
     setMembers(prev => prev.filter(m => !ids.includes(m.id)));
     setEvents(prev => prev.filter(e => !codesToDelete.includes(e.memberCode)));
     setOfflineQueue(prev => prev.filter(code => !codesToDelete.includes(code)));
@@ -648,14 +713,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const bulkImportMembers = (incomingMembers: Member[]) => {
-    // Optimistic
     setMembers(prev => {
       const existingMap = new Map<string, Member>();
       prev.forEach(m => existingMap.set(m.id, m));
-      incomingMembers.forEach(m => {
-        existingMap.set(m.id, m);
-      });
-      return Array.from(existingMap.values()).sort((a,b) => b.id.localeCompare(a.id));
+      incomingMembers.forEach(m => { existingMap.set(m.id, m); });
+      return Array.from(existingMap.values()).sort((a, b) => b.id.localeCompare(a.id));
     });
 
     const client = getSupabaseClient() as any;
@@ -680,15 +742,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const todayStr = new Date().toISOString().split('T')[0];
-
     const alreadyScanned = events.some(e => e.memberCode === cleanCode && e.date === todayStr);
     const alreadyInQueue = offlineQueue.includes(cleanCode);
 
     if (alreadyScanned || alreadyInQueue) {
-      return { 
-        success: false, 
+      return {
+        success: false,
         message: `${matchedMember.fullName} has already registered check-in for today.`,
-        duplicate: true 
+        duplicate: true
       };
     }
 
@@ -696,9 +757,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!offlineQueue.includes(cleanCode)) {
         setOfflineQueue(prev => [...prev, cleanCode]);
       }
-      return { 
-        success: true, 
-        message: `${matchedMember.fullName} QR checked. Saved in local offline queue! (${cleanCode})` 
+      return {
+        success: true,
+        message: `${matchedMember.fullName} QR checked. Saved in local offline queue! (${cleanCode})`
       };
     }
 
@@ -714,7 +775,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       synced: true
     };
 
-    // Optimistic Update
     setEvents(prev => [newEvent, ...prev]);
 
     const client = getSupabaseClient() as any;
@@ -804,7 +864,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const client = getSupabaseClient() as any;
     if (client) {
       Promise.resolve(client.from('admins').insert([newAdmin])).catch((err: any) => {
-        console.error('Error saving provisioned admin admin to Supabase:', err);
+        console.error('Error saving provisioned admin to Supabase:', err);
       });
     }
   };

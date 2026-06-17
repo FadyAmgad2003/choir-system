@@ -14,11 +14,16 @@ export const Login: React.FC = () => {
     setErrorMsg('');
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      const res = login(email, password);
-      setIsSubmitting(false);
-      if (!res.success) {
-        setErrorMsg(res.message);
+    setTimeout(async () => {
+      try {
+        const res = await login(email, password);
+        setIsSubmitting(false);
+        if (!res.success) {
+          setErrorMsg(res.message);
+        }
+      } catch (err: any) {
+        setIsSubmitting(false);
+        setErrorMsg(err?.message || 'Login failed');
       }
     }, 600);
   };
@@ -128,10 +133,15 @@ export const Login: React.FC = () => {
                 setPassword('super');
                 setErrorMsg('');
                 setIsSubmitting(true);
-                setTimeout(() => {
-                  const res = login('superadmin@church.org', 'super');
-                  setIsSubmitting(false);
-                  if (!res.success) setErrorMsg(res.message);
+                setTimeout(async () => {
+                  try {
+                    const res = await login('superadmin@church.org', 'super');
+                    setIsSubmitting(false);
+                    if (!res.success) setErrorMsg(res.message);
+                  } catch (err: any) {
+                    setIsSubmitting(false);
+                    setErrorMsg(err?.message || 'Login failed');
+                  }
                 }, 400);
               }}
               className="w-full py-2 px-3 border border-indigo-100 bg-indigo-50/50 hover:bg-indigo-50 text-indigo-900 rounded-xl flex items-center justify-between text-[11px] font-semibold transition-all hover:scale-[1.01] cursor-pointer"
@@ -148,15 +158,22 @@ export const Login: React.FC = () => {
                 setPassword('admin');
                 setErrorMsg('');
                 setIsSubmitting(true);
-                setTimeout(() => {
-                  const res = login('maannddrr@gmail.com', 'admin');
-                  setIsSubmitting(false);
-                  if (!res.success) {
-                    // Try backup diocese admin if not seeded yet
-                    const resBackup = login('fadyamgd126@gmail.com', 'admin');
-                    if (!resBackup.success) {
-                      setErrorMsg(resBackup.message);
+                setTimeout(async () => {
+                  try {
+                    const res = await login('maannddrr@gmail.com', 'admin');
+                    if (res.success) {
+                      setIsSubmitting(false);
+                    } else {
+                      // Try backup diocese admin if not seeded yet
+                      const resBackup = await login('fadyamgd126@gmail.com', 'admin');
+                      setIsSubmitting(false);
+                      if (!resBackup.success) {
+                        setErrorMsg(resBackup.message);
+                      }
                     }
+                  } catch (err: any) {
+                    setIsSubmitting(false);
+                    setErrorMsg(err?.message || 'Login failed');
                   }
                 }, 400);
               }}
@@ -174,10 +191,15 @@ export const Login: React.FC = () => {
                 setPassword('officer');
                 setErrorMsg('');
                 setIsSubmitting(true);
-                setTimeout(() => {
-                  const res = login('peter.m@diocesestaff.org', 'officer');
-                  setIsSubmitting(false);
-                  if (!res.success) setErrorMsg(res.message);
+                setTimeout(async () => {
+                  try {
+                    const res = await login('peter.m@diocesestaff.org', 'officer');
+                    setIsSubmitting(false);
+                    if (!res.success) setErrorMsg(res.message);
+                  } catch (err: any) {
+                    setIsSubmitting(false);
+                    setErrorMsg(err?.message || 'Login failed');
+                  }
                 }, 400);
               }}
               className="w-full py-2 px-3 border border-emerald-100 bg-emerald-50/20 hover:bg-emerald-50/40 text-emerald-900 rounded-xl flex items-center justify-between text-[11px] font-semibold transition-all hover:scale-[1.01] cursor-pointer"
