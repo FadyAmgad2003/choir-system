@@ -3,7 +3,7 @@ import { useApp } from './AppContext';
 import { Mail, Key, ShieldCheck, Languages, AlertCircle, Camera, Database, X, RefreshCw, Signal } from 'lucide-react';
 
 export const Login: React.FC = () => {
-  const { login, language, setLanguage, t, isSupabaseConnected, supabaseUrl, updateSupabaseConfig } = useApp();
+  const { login, language, setLanguage, t, isSupabaseConnected, supabaseUrl, supabaseAnonKey, updateSupabaseConfig } = useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -14,6 +14,66 @@ export const Login: React.FC = () => {
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [scannerSuccess, setScannerSuccess] = useState<string | null>(null);
   const html5QrCodeRef = useRef<any>(null);
+
+  // Manual Credentials state
+  const [isManualOpen, setIsManualOpen] = useState(false);
+  const [manualUrl, setManualUrl] = useState('');
+  const [manualKey, setManualKey] = useState('');
+  const [manualStatus, setManualStatus] = useState<{ success?: boolean; msg: string } | null>(null);
+
+  // prefill when opening manual config
+  useEffect(() => {
+    if (isManualOpen) {
+      setManualUrl(supabaseUrl.includes('hvgkibbyqqreytwtcwwx') ? '' : supabaseUrl);
+      setManualKey(supabaseUrl.includes('hvgkibbyqqreytwtcwwx') ? '' : supabaseAnonKey);
+    }
+  }, [isManualOpen, supabaseUrl, supabaseAnonKey]);
+
+  const handleManualSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    setManualStatus(null);
+    if (!manualUrl.trim() || !manualKey.trim()) {
+      setManualStatus({ 
+        success: false, 
+        msg: language === 'ar' ? 'الرجاء إدخال كافة الحقول.' : 'Please enter both fields.' 
+      });
+      return;
+    }
+    try {
+      updateSupabaseConfig(manualUrl.trim(), manualKey.trim());
+      setManualStatus({
+        success: true,
+        msg: language === 'ar' 
+          ? '⚡ تم تطبيق الإعدادات وتحديث الاتصال بنجاح!' 
+          : '⚡ Configuration applied and live connection established!'
+      });
+      setTimeout(() => {
+        setIsManualOpen(false);
+        setManualStatus(null);
+      }, 1500);
+    } catch (err: any) {
+      setManualStatus({
+        success: false,
+        msg: err.message || 'Config failed'
+      });
+    }
+  };
+
+  const handleRestoreDefault = () => {
+    updateSupabaseConfig('', ''); // clears customized DB
+    setManualUrl('');
+    setManualKey('');
+    setManualStatus({
+      success: true,
+      msg: language === 'ar' 
+        ? 'تمت العودة والاتصال بالمشروع الافتراضي!' 
+        : 'Restored and connected back to the Demo Project!'
+    });
+    setTimeout(() => {
+      setIsManualOpen(false);
+      setManualStatus(null);
+    }, 1500);
+  };
 
   useEffect(() => {
     if (isScannerOpen) {
@@ -283,6 +343,67 @@ export const Login: React.FC = () => {
             <Camera className="h-3.5 w-3.5 shrink-0 text-indigo-600 animate-pulse" />
             <span>{language === 'ar' ? 'الربط ومزامنة الأجهزة بالكاميرا 🔌' : 'Link Device / Sync via Camera 🔌'}</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setIsManualOpen(!isManualOpen)}
+            className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[10px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+          >
+            <Database className="h-3 w-3 shrink-0" />
+            <span>{isManualOpen ? (language === 'ar' ? 'إغلاق الإعداد اليدوي ✖️' : 'Close Manual Setup ✖️') : (language === 'ar' ? 'أو إدخال بيانات الربط يدوياً ⚙️' : 'Or Custom DB Credentials Manually ⚙️')}</span>
+          </button>
+
+          {isManualOpen && (
+            <form onSubmit={handleManualSave} className="mt-2 p-3 bg-white border border-slate-200 rounded-xl space-y-2.5 text-start animate-[fadeIn_0.2s_ease-out]">
+              <div className="space-y-1 font-sans">
+                <label className="text-[10px] font-bold text-slate-600 block text-start">
+                  {language === 'ar' ? 'رابط مشروع Supabase URL:' : 'Supabase Project URL:'}
+                </label>
+                <input
+                  type="text"
+                  value={manualUrl}
+                  onChange={(e) => setManualUrl(e.target.value)}
+                  placeholder="https://your-project.supabase.co"
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-sans"
+                />
+              </div>
+
+              <div className="space-y-1 font-sans">
+                <label className="text-[10px] font-bold text-slate-600 block text-start">
+                  {language === 'ar' ? 'مفتاح المشروع Anon Key:' : 'Project Anon Key:'}
+                </label>
+                <textarea
+                  value={manualKey}
+                  onChange={(e) => setManualKey(e.target.value)}
+                  placeholder="eyJhbGciOiJIUzI1Ni..."
+                  rows={2}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono resize-none leading-normal"
+                />
+              </div>
+
+              {manualStatus && (
+                <div className={`p-2 rounded-lg text-[10px] leading-relaxed font-semibold ${manualStatus.success ? 'bg-emerald-50 text-emerald-800 border border-emerald-150' : 'bg-rose-50 text-rose-800 border border-rose-150'}`}>
+                  {manualStatus.msg}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="submit"
+                  className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer text-center"
+                >
+                  {language === 'ar' ? 'حفظ والربط ⚡' : 'Connect & Link ⚡'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRestoreDefault}
+                  className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-[10px] font-bold transition-colors cursor-pointer text-center"
+                >
+                  {language === 'ar' ? 'إعادة تعيين' : 'Restore Demo'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
 
         {/* Quick Demo Access Credentials Helper */}

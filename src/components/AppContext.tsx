@@ -214,22 +214,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (account) {
           setCurrentUser(account);
           localStorage.setItem('cams_session', JSON.stringify(account));
+          localStorage.setItem('cams_session_auth_sync', 'true');
         }
       }
     })();
 
     // Listen for future sign-in / sign-out events
     const { data: { subscription } } = client.auth.onAuthStateChange(
-      (_event: string, session: any) => {
+      (event: string, session: any) => {
         if (session?.user) {
           const account = resolveUserAccount(session.user.email ?? '', session.user.id);
           if (account) {
             setCurrentUser(account);
             localStorage.setItem('cams_session', JSON.stringify(account));
+            localStorage.setItem('cams_session_auth_sync', 'true');
           }
-        } else {
+        } else if (event === 'SIGNED_OUT') {
           setCurrentUser(null);
           localStorage.removeItem('cams_session');
+          localStorage.removeItem('cams_session_auth_sync');
+        } else if (event === 'INITIAL_SESSION') {
+          // If we had a Supabase OAuth/Auth session on a previous boot but now it loads as null, safely clear.
+          // Otherwise, if they logged in locally via Local/DB credentials fallback (like Fady's case), do NOT log them out.
+          const wasAuthSynced = localStorage.getItem('cams_session_auth_sync') === 'true';
+          if (wasAuthSynced) {
+            setCurrentUser(null);
+            localStorage.removeItem('cams_session');
+            localStorage.removeItem('cams_session_auth_sync');
+          }
         }
       }
     );
@@ -269,6 +281,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
           setCurrentUser(account);
           localStorage.setItem('cams_session', JSON.stringify(account));
+          localStorage.setItem('cams_session_auth_sync', 'true');
           return {
             success: true,
             message: language === 'ar' ? 'تم تسجيل الدخول بنجاح!' : 'Successfully signed in!'
@@ -316,6 +329,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         setCurrentUser(user);
         localStorage.setItem('cams_session', JSON.stringify(user));
+        localStorage.removeItem('cams_session_auth_sync'); // Explicitly local fallback user
         return { success: true, message: language === 'ar' ? 'تم تسجيل الدخول بنجاح!' : 'Successfully signed in!' };
       }
     }
@@ -333,6 +347,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     setCurrentUser(null);
     localStorage.removeItem('cams_session');
+    localStorage.removeItem('cams_session_auth_sync');
   };
 
   // ── switchRole: kept for dev convenience (no Supabase Auth call) ──────────
@@ -362,6 +377,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     setCurrentUser(account);
     localStorage.setItem('cams_session', JSON.stringify(account));
+    localStorage.removeItem('cams_session_auth_sync');
   };
 
   // 5. Church Settings Config
