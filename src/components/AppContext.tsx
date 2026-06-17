@@ -55,8 +55,6 @@ interface AppContextType {
   isSupabaseConnected: boolean;
   supabaseError: string | null;
   updateSupabaseConfig: (url: string, key: string) => void;
-  isUsingCustomConfigOverride: boolean;
-  resetDatabaseToEnv: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -111,23 +109,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [supabaseError, setSupabaseError] = useState<string | null>(null);
   const [syncTrigger, setSyncTrigger] = useState<number>(0);
 
-  const [isUsingCustomConfigOverride, setIsUsingCustomConfigOverride] = useState<boolean>(() => {
-    return !!(localStorage.getItem('cams_supabase_url') || localStorage.getItem('cams_supabase_anon_key'));
-  });
-
   const updateSupabaseConfig = (url: string, key: string) => {
     const cleanedUrl = cleanSupabaseUrl(url);
     const cleanedKey = key.trim();
     if (cleanedUrl && cleanedKey) {
       localStorage.setItem('cams_supabase_url', cleanedUrl);
       localStorage.setItem('cams_supabase_anon_key', cleanedKey);
-      setIsUsingCustomConfigOverride(true);
       setSupabaseUrl(cleanedUrl);
       setSupabaseAnonKey(cleanedKey);
     } else {
       localStorage.removeItem('cams_supabase_url');
       localStorage.removeItem('cams_supabase_anon_key');
-      setIsUsingCustomConfigOverride(false);
       const creds = getSupabaseCredentials();
       setSupabaseUrl(creds.url);
       setSupabaseAnonKey(creds.key);
@@ -136,20 +128,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsSupabaseConnected(false);
     setSupabaseError(null);
     // Trigger real-time synchronization re-run
-    setSyncTrigger(prev => prev + 1);
-  };
-
-  const resetDatabaseToEnv = () => {
-    localStorage.removeItem('cams_supabase_url');
-    localStorage.removeItem('cams_supabase_anon_key');
-    setIsUsingCustomConfigOverride(false);
-    
-    const creds = getSupabaseCredentials();
-    setSupabaseUrl(creds.url);
-    setSupabaseAnonKey(creds.key);
-    resetSupabaseClient();
-    setIsSupabaseConnected(false);
-    setSupabaseError(null);
     setSyncTrigger(prev => prev + 1);
   };
 
@@ -893,9 +871,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       supabaseAnonKey,
       isSupabaseConnected,
       supabaseError,
-      updateSupabaseConfig,
-      isUsingCustomConfigOverride,
-      resetDatabaseToEnv
+      updateSupabaseConfig
     }}>
       {children}
     </AppContext.Provider>

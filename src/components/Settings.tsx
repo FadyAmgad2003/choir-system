@@ -16,9 +16,7 @@ export const Settings: React.FC = () => {
     supabaseAnonKey,
     isSupabaseConnected,
     supabaseError,
-    updateSupabaseConfig,
-    isUsingCustomConfigOverride,
-    resetDatabaseToEnv
+    updateSupabaseConfig
   } = useApp();
 
   const [localOrgName, setLocalOrgName] = useState(orgName);
@@ -148,7 +146,15 @@ create table if not exists public.settings (
   "logoUrl" text
 );
 
--- 8. Turn On Realtime Synchronization Alerts
+-- 8. Turn On Realtime Synchronization Alerts & Enable Full Row Replication for bi-directional updates
+alter table public.organizations replica identity full;
+alter table public.churches replica identity full;
+alter table public.choirs replica identity full;
+alter table public.admins replica identity full;
+alter table public.members replica identity full;
+alter table public.events replica identity full;
+alter table public.settings replica identity full;
+
 drop publication if exists supabase_realtime;
 create publication supabase_realtime for table 
   public.organizations, 
@@ -444,21 +450,7 @@ alter table public.settings disable row level security;
                 {language === 'ar' ? 'ربط وتفعيل المزامنة' : 'Connect & Sync Real-Time'}
               </button>
 
-              {isUsingCustomConfigOverride ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetDatabaseToEnv();
-                    setDbUrl('');
-                    setDbKey('');
-                    setDbSuccessMsg(language === 'ar' ? '🔄 تم استعادة الإعدادات الافتراضية للسيرفر ومزامنتها بنجاح!' : '🔄 Server defaults restored & synchronized successfully!');
-                    setTimeout(() => setDbSuccessMsg(''), 4000);
-                  }}
-                  className="cursor-pointer px-4 py-2.5 border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
-                >
-                  {language === 'ar' ? 'استعادة الافتراضي للسيرفر 🔄' : 'Restore Server Defaults 🔄'}
-                </button>
-              ) : (dbUrl || dbKey) ? (
+              {(dbUrl || dbKey) ? (
                 <button
                   type="button"
                   onClick={() => {

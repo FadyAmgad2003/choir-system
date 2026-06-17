@@ -30,8 +30,10 @@ export function getSupabaseCredentials() {
   const localUrl = localStorage.getItem('cams_supabase_url');
   const localKey = localStorage.getItem('cams_supabase_anon_key');
 
-  const url = cleanSupabaseUrl(localUrl || envUrl || fallbackUrl);
-  const key = (localKey || envKey || fallbackKey).trim();
+  // Prioritize environment configuration defined by secrets over local storage or fallback defaults.
+  // This immediately connects laptops and helper mobile scanners on the same active cloud project.
+  const url = cleanSupabaseUrl(envUrl || localUrl || fallbackUrl);
+  const key = (envKey || localKey || fallbackKey).trim();
 
   return { url, key };
 }
