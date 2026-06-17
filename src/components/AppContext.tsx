@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { UserRole, UserAccount, Organization, Church, ChoirDepartment, Member, AttendanceEvent } from '../types';
 import { INITIAL_ORGANIZATIONS, INITIAL_CHURCHES, INITIAL_CHOIRS, INITIAL_MEMBERS, INITIAL_EVENTS, TRANSLATIONS, AppLanguage } from '../data';
 import { getSupabaseClient, getSupabaseCredentials, resetSupabaseClient, isSupabaseConfigured, cleanSupabaseUrl } from '../supabaseClient';
+import { realtimeSyncService } from '../services/realtimeSync';
 
 interface AppContextType {
   // Localization
@@ -612,7 +613,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // 7. Establish Real-time Sync listeners with Supabase PostgreSQL
+  // 7. Establish Real-time Sync listeners with Supabase PostgreSQL - ENHANCED CROSS-DEVICE SYNC
   useEffect(() => {
     const client = getSupabaseClient() as any;
     if (!client) {
@@ -623,8 +624,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     fetchInitialData(client);
 
+    // Setup real-time sync service with callbacks for data changes
+    realtimeSyncService.initialize({
+      onMembersChange: (newMembers: Member[]) => {
+        console.log('🔄 Syncing members from other device:', newMembers.length);
+        setMembers(newMembers);
+      },
+      onEventsChange: (newEvents: AttendanceEvent[]) => {
+        console.log('🔄 Syncing events from other device:', newEvents.length);
+        setEvents(newEvents);
+      },
+      onOrganizationsChange: (newOrgs: Organization[]) => {
+        console.log('🔄 Syncing organizations from other device:', newOrgs.length);
+        setOrganizations(newOrgs);
+      },
+      onChurchesChange: (newChurches: Church[]) => {
+        console.log('🔄 Syncing churches from other device:', newChurches.length);
+        setChurches(newChurches);
+      },
+      onChoirsChange: (newChoirs: ChoirDepartment[]) => {
+        console.log('🔄 Syncing choirs from other device:', newChoirs.length);
+        setChoirs(newChoirs);
+      },
+      onConnectionChange: (connected: boolean) => {
+        console.log(`🔌 Real-time connection ${connected ? 'established' : 'lost'}`);
+        if (connected && fetchSuccessRef.current) {
+          setIsSupabaseConnected(true);
+        } else if (!connected) {
+          setIsSupabaseConnected(false);
+        }
+      }
+    });
+
+    // Also setup channel for admins and settings (these are handled separately)
     const channel = client
-      .channel('cams-supabase-pubsub')
+      .channel('cams-admin-settings-sync')
       // Admins Sync
       .on('postgres_changes', { event: '*', schema: 'public', table: 'admins' }, (payload: any) => {
         const { eventType, new: newRec, old: oldRec } = payload;
@@ -638,67 +672,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         } else if (eventType === 'DELETE') {
           setAdmins(prev => prev.filter(a => a.id !== oldRec.id));
-        }
-      })
-      // Organizations Sync
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'organizations' }, (payload: any) => {
-        const { eventType, new: newRec, old: oldRec } = payload;
-        if (eventType === 'INSERT') {
-          setOrganizations(prev => prev.some(o => o.id === newRec.id) ? prev : [...prev, newRec as Organization]);
-        } else if (eventType === 'UPDATE') {
-          setOrganizations(prev => prev.map(o => o.id === newRec.id ? (newRec as Organization) : o));
-        } else if (eventType === 'DELETE') {
-          setOrganizations(prev => prev.filter(o => o.id !== oldRec.id));
-        }
-      })
-      // Churches Sync
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'churches' }, (payload: any) => {
-        const { eventType, new: newRec, old: oldRec } = payload;
-        if (eventType === 'INSERT') {
-          setChurches(prev => prev.some(c => c.id === newRec.id) ? prev : [...prev, newRec as Church]);
-        } else if (eventType === 'UPDATE') {
-          setChurches(prev => prev.map(c => c.id === newRec.id ? (newRec as Church) : c));
-        } else if (eventType === 'DELETE') {
-          setChurches(prev => prev.filter(c => c.id !== oldRec.id));
-        }
-      })
-      // Choirs Sync
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'choirs' }, (payload: any) => {
-        const { eventType, new: newRec, old: oldRec } = payload;
-        if (eventType === 'INSERT') {
-          setChoirs(prev => prev.some(c => c.id === newRec.id) ? prev : [...prev, newRec as ChoirDepartment]);
-        } else if (eventType === 'UPDATE') {
-          setChoirs(prev => prev.map(c => c.id === newRec.id ? (newRec as ChoirDepartment) : c));
-        } else if (eventType === 'DELETE') {
-          setChoirs(prev => prev.filter(c => c.id !== oldRec.id));
-        }
-      })
-      // Members Sync
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'members' }, (payload: any) => {
-        const { eventType, new: newRec, old: oldRec } = payload;
-        if (eventType === 'INSERT') {
-          setMembers(prev => {
-            if (prev.some(m => m.id === newRec.id)) return prev;
-            return [newRec as Member, ...prev].sort((a, b) => b.id.localeCompare(a.id));
-          });
-        } else if (eventType === 'UPDATE') {
-          setMembers(prev => prev.map(m => m.id === newRec.id ? (newRec as Member) : m));
-        } else if (eventType === 'DELETE') {
-          setMembers(prev => prev.filter(m => m.id !== oldRec.id));
-        }
-      })
-      // Events Sync
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, (payload: any) => {
-        const { eventType, new: newRec, old: oldRec } = payload;
-        if (eventType === 'INSERT') {
-          setEvents(prev => {
-            if (prev.some(e => e.id === newRec.id)) return prev;
-            return [newRec as AttendanceEvent, ...prev].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-          });
-        } else if (eventType === 'UPDATE') {
-          setEvents(prev => prev.map(e => e.id === newRec.id ? (newRec as AttendanceEvent) : e));
-        } else if (eventType === 'DELETE') {
-          setEvents(prev => prev.filter(e => e.id !== oldRec.id));
         }
       })
       // Settings Sync
@@ -719,13 +692,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       })
       .subscribe((status: string) => {
-        console.log('Supabase real-time pubsub status:', status);
-        if (status === 'SUBSCRIBED' && fetchSuccessRef.current) {
-          setIsSupabaseConnected(true);
-        }
+        console.log('✅ Admin/Settings sync channel status:', status);
       });
 
     return () => {
+      realtimeSyncService.disconnect();
       client.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

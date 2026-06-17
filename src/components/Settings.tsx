@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from './AppContext';
 import { QRCodeImage } from '../qr';
+import { SUPABASE_SCHEMA_SQL } from '../data';
 import { Settings as SettingsIcon, Globe, Building, Image, HelpCircle, Database, CheckCircle, AlertTriangle, Key, Copy, Check, Smartphone } from 'lucide-react';
 
 export const Settings: React.FC = () => {
@@ -70,129 +71,7 @@ export const Settings: React.FC = () => {
     }, 4000);
   };
 
-  const sqlSetupScript = `-- === COPY AND PASTE INTO SUPABASE SQL EDITOR ===
-
--- 1. Create Table: Organizations
-create table if not exists public.organizations (
-  id text primary key,
-  name text not null,
-  "logoUrl" text,
-  "churchCount" int default 0
-);
-
--- 2. Create Table: Churches
-create table if not exists public.churches (
-  id text primary key,
-  "organizationId" text,
-  name text not null,
-  location text
-);
-
--- 3. Create Table: Choirs
-create table if not exists public.choirs (
-  id text primary key,
-  "churchId" text,
-  name text not null,
-  description text
-);
-
--- 4. Create Table: Admins
-create table if not exists public.admins (
-  id text primary key,
-  name text not null,
-  email text not null,
-  role text not null,
-  password text not null,
-  "organizationId" text,
-  "choirId" text,
-  status text not null
-);
-
--- 5. Create Table: Members
-create table if not exists public.members (
-  id text primary key,
-  "memberCode" text not null,
-  "fullName" text not null,
-  gender text,
-  "profileImageUrl" text,
-  "mobileNumber" text,
-  "parentMobileNumber" text,
-  school text,
-  "educationStage" text,
-  "memberType" text,
-  status text not null,
-  "joinDate" text,
-  "choirId" text,
-  notes text
-);
-
--- 6. Create Table: Events
-create table if not exists public.events (
-  id text primary key,
-  "memberCode" text not null,
-  "adminId" text,
-  "adminName" text,
-  timestamp text not null,
-  date text not null,
-  "choirId" text,
-  "deviceInfo" text,
-  synced boolean default true
-);
-
--- 7. Create Table: Settings Configs
-create table if not exists public.settings (
-  id text primary key default 'config',
-  "orgName" text,
-  "logoUrl" text
-);
-
--- 8. Turn On Realtime Synchronization Alerts & Enable Full Row Replication for bi-directional updates
-alter table public.organizations replica identity full;
-alter table public.churches replica identity full;
-alter table public.choirs replica identity full;
-alter table public.admins replica identity full;
-alter table public.members replica identity full;
-alter table public.events replica identity full;
-alter table public.settings replica identity full;
-
--- Safe, error-tolerant way to add tables to publication if not already present
-do $$
-begin
-  -- Ensure publication exists
-  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    create publication supabase_realtime;
-  end if;
-end $$;
-
--- Drop specific tables from publication first to avoid "already member" errors on repeat runs
-alter publication supabase_realtime drop table if exists
-  public.organizations, 
-  public.churches, 
-  public.choirs, 
-  public.admins, 
-  public.members, 
-  public.events, 
-  public.settings;
-
--- Add all tables securely to the database publication
-alter publication supabase_realtime add table 
-  public.organizations, 
-  public.churches, 
-  public.choirs, 
-  public.admins, 
-  public.members, 
-  public.events, 
-  public.settings;
-
--- 9. Disable Row Level Security (RLS) on all tables to allow bidirectional Laptop/Mobile scanning & sync without complex auth barriers
-alter table public.organizations disable row level security;
-alter table public.churches disable row level security;
-alter table public.choirs disable row level security;
-alter table public.admins disable row level security;
-alter table public.members disable row level security;
-alter table public.events disable row level security;
-alter table public.settings disable row level security;
-`;
+  const sqlSetupScript = SUPABASE_SCHEMA_SQL;
 
   const copySQLToClipboard = () => {
     navigator.clipboard.writeText(sqlSetupScript);

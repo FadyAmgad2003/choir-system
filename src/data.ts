@@ -1,4 +1,224 @@
 import { Organization, Church, ChoirDepartment, Member, AttendanceEvent } from './types';
+import { getSupabaseClient } from './supabaseClient';
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * SUPABASE DATA FETCHING FUNCTIONS
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * These functions fetch real data from Supabase tables.
+ * If Supabase is unavailable, they return null or empty arrays as fallbacks.
+ */
+
+export async function fetchOrganizationsFromSupabase(): Promise<Organization[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const { data, error } = await client.from('organizations').select('*');
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.warn('Failed to fetch organizations from Supabase:', err);
+    return null;
+  }
+}
+
+export async function fetchChurchesFromSupabase(): Promise<Church[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const { data, error } = await client.from('churches').select('*');
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.warn('Failed to fetch churches from Supabase:', err);
+    return null;
+  }
+}
+
+export async function fetchChoirsFromSupabase(): Promise<ChoirDepartment[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const { data, error } = await client.from('choirs').select('*');
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.warn('Failed to fetch choirs from Supabase:', err);
+    return null;
+  }
+}
+
+export async function fetchMembersFromSupabase(): Promise<Member[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const { data, error } = await client.from('members').select('*');
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.warn('Failed to fetch members from Supabase:', err);
+    return null;
+  }
+}
+
+export async function fetchEventsFromSupabase(): Promise<AttendanceEvent[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const { data, error } = await client.from('events').select('*');
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.warn('Failed to fetch events from Supabase:', err);
+    return null;
+  }
+}
+
+/**
+ * SQL Schema for Supabase Setup
+ * Copy and paste this into the SQL Editor in your Supabase dashboard
+ */
+export const SUPABASE_SCHEMA_SQL = `
+-- Organizations/Dioceses
+CREATE TABLE IF NOT EXISTS organizations (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  "logoUrl" text,
+  "churchCount" integer DEFAULT 0,
+  created_at timestamp DEFAULT now()
+);
+
+-- Churches/Parishes
+CREATE TABLE IF NOT EXISTS churches (
+  id text PRIMARY KEY,
+  "organizationId" text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  location text,
+  created_at timestamp DEFAULT now()
+);
+
+-- Choir Departments/Groups
+CREATE TABLE IF NOT EXISTS choirs (
+  id text PRIMARY KEY,
+  "churchId" text NOT NULL REFERENCES churches(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  description text,
+  created_at timestamp DEFAULT now()
+);
+
+-- Members Registry
+CREATE TABLE IF NOT EXISTS members (
+  id text PRIMARY KEY,
+  "memberCode" text NOT NULL UNIQUE,
+  "fullName" text NOT NULL,
+  gender text NOT NULL,
+  "profileImageUrl" text,
+  "mobileNumber" text,
+  "parentMobileNumber" text,
+  school text,
+  "educationStage" text,
+  "memberType" text DEFAULT 'New',
+  status text DEFAULT 'Active',
+  "joinDate" text,
+  "choirId" text REFERENCES choirs(id) ON DELETE SET NULL,
+  notes text,
+  created_at timestamp DEFAULT now(),
+  updated_at timestamp DEFAULT now()
+);
+
+-- Attendance Events/Logs
+CREATE TABLE IF NOT EXISTS events (
+  id text PRIMARY KEY,
+  "memberCode" text NOT NULL,
+  "adminId" text NOT NULL,
+  "adminName" text NOT NULL,
+  timestamp text NOT NULL,
+  date text NOT NULL,
+  "choirId" text NOT NULL,
+  "deviceInfo" text,
+  synced boolean DEFAULT true,
+  created_at timestamp DEFAULT now()
+);
+
+-- Settings/Configuration
+CREATE TABLE IF NOT EXISTS settings (
+  id text PRIMARY KEY,
+  "orgName" text,
+  "logoUrl" text,
+  created_at timestamp DEFAULT now(),
+  updated_at timestamp DEFAULT now()
+);
+
+-- Admins/User Accounts
+CREATE TABLE IF NOT EXISTS admins (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  email text NOT NULL UNIQUE,
+  role text NOT NULL,
+  password text,
+  "organizationId" text REFERENCES organizations(id) ON DELETE SET NULL,
+  "choirId" text REFERENCES choirs(id) ON DELETE SET NULL,
+  status text DEFAULT 'active',
+  created_at timestamp DEFAULT now(),
+  updated_at timestamp DEFAULT now()
+);
+
+-- Enable Row Level Security (RLS) for security
+ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE churches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE choirs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admins ENABLE ROW LEVEL SECURITY;
+
+-- Public RLS Policies (Allow all operations for now - restrict in production!)
+CREATE POLICY "organizations_public_read" ON organizations FOR SELECT USING (true);
+CREATE POLICY "organizations_public_write" ON organizations FOR INSERT WITH CHECK (true);
+CREATE POLICY "organizations_public_update" ON organizations FOR UPDATE USING (true);
+CREATE POLICY "organizations_public_delete" ON organizations FOR DELETE USING (true);
+
+CREATE POLICY "churches_public_read" ON churches FOR SELECT USING (true);
+CREATE POLICY "churches_public_write" ON churches FOR INSERT WITH CHECK (true);
+CREATE POLICY "churches_public_update" ON churches FOR UPDATE USING (true);
+CREATE POLICY "churches_public_delete" ON churches FOR DELETE USING (true);
+
+CREATE POLICY "choirs_public_read" ON choirs FOR SELECT USING (true);
+CREATE POLICY "choirs_public_write" ON choirs FOR INSERT WITH CHECK (true);
+CREATE POLICY "choirs_public_update" ON choirs FOR UPDATE USING (true);
+CREATE POLICY "choirs_public_delete" ON choirs FOR DELETE USING (true);
+
+CREATE POLICY "members_public_read" ON members FOR SELECT USING (true);
+CREATE POLICY "members_public_write" ON members FOR INSERT WITH CHECK (true);
+CREATE POLICY "members_public_update" ON members FOR UPDATE USING (true);
+CREATE POLICY "members_public_delete" ON members FOR DELETE USING (true);
+
+CREATE POLICY "events_public_read" ON events FOR SELECT USING (true);
+CREATE POLICY "events_public_write" ON events FOR INSERT WITH CHECK (true);
+CREATE POLICY "events_public_update" ON events FOR UPDATE USING (true);
+CREATE POLICY "events_public_delete" ON events FOR DELETE USING (true);
+
+CREATE POLICY "settings_public_read" ON settings FOR SELECT USING (true);
+CREATE POLICY "settings_public_write" ON settings FOR INSERT WITH CHECK (true);
+CREATE POLICY "settings_public_update" ON settings FOR UPDATE USING (true);
+
+CREATE POLICY "admins_public_read" ON admins FOR SELECT USING (true);
+CREATE POLICY "admins_public_write" ON admins FOR INSERT WITH CHECK (true);
+CREATE POLICY "admins_public_update" ON admins FOR UPDATE USING (true);
+CREATE POLICY "admins_public_delete" ON admins FOR DELETE USING (true);
+`;
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * FALLBACK/DEMO DATA
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * These are used when Supabase is not available or when seeding an empty database.
+ */
 
 export const INITIAL_ORGANIZATIONS: Organization[] = [
   {
@@ -269,6 +489,24 @@ export const INITIAL_EVENTS: AttendanceEvent[] = [
   }
 ];
 
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * SETUP INSTRUCTIONS FOR SUPABASE
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * 1. Go to your Supabase Project Dashboard
+ * 2. Click "SQL Editor" in the left sidebar
+ * 3. Click "New Query"
+ * 4. Copy the SQL schema from SUPABASE_SCHEMA_SQL (see settings panel in the app)
+ * 5. Paste and click "Run"
+ * 6. Your tables will be created and ready for data!
+ * 
+ * After tables are created, the app will automatically:
+ * - Seed demo data on first load (only if using the default fallback database)
+ * - Fetch data from Supabase on every load
+ * - Sync data back to Supabase when you make changes
+ */
+
 export const TRANSLATIONS = {
   en: {
     // Basic Navigation
@@ -368,6 +606,12 @@ export const TRANSLATIONS = {
     activeTimezone: 'Assembly Session Rules Status',
     timezoneLog: 'Time Windows Status: Event-Based Infinite Logs (No Lockouts)',
     updateSettingsBtn: 'Update Configuration',
+    
+    // Supabase Setup
+    supabaseSetupTitle: 'Database Schema Setup',
+    supabaseSetupDesc: 'Copy the SQL below and paste it into your Supabase SQL Editor to create the required tables.',
+    copySqlBtn: 'Copy SQL Schema',
+    sqlCopied: 'SQL schema copied to clipboard!',
 
     // Super Admin Control Room
     superPanelTitle: 'Super-Admin Strategic Command (Hidden System)',
@@ -485,6 +729,12 @@ export const TRANSLATIONS = {
     activeTimezone: 'قواعد نافذة الحضور والاجتماعات للمسرح',
     timezoneLog: 'فترات الحضور: مستند إلى الأحداث المفتوحة وغير المقيد بنافذة زمنية مغلقة لمنع الإخفاق.',
     updateSettingsBtn: 'حفظ وحقن التعديلات للإدارة',
+    
+    // Supabase Setup
+    supabaseSetupTitle: 'إعداد منظومة قاعدة البيانات',
+    supabaseSetupDesc: 'انسخ كود SQL أدناه والصقه في محرر SQL داخل Supabase لإنشاء الجداول المطلوبة.',
+    copySqlBtn: 'نسخ كود SQL',
+    sqlCopied: 'تم نسخ كود SQL بنجاح!',
 
     // Super Admin Control Room
     superPanelTitle: 'منظومة الرقابة الإستراتيجية العليا (لوحة السوبر أدمن المخفية)',

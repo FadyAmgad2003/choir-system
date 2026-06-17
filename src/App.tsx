@@ -8,6 +8,8 @@ import { IDCards } from './components/IDCards';
 import { Settings } from './components/Settings';
 import { SuperAdmin } from './components/SuperAdmin';
 import { Login } from './components/Login';
+import { SupabaseSetup } from './components/SupabaseSetup';
+import { RealtimeSyncStatus } from './components/RealtimeSyncStatus';
 import { 
   Users, 
   Camera, 
@@ -51,12 +53,16 @@ const MainAppContent: React.FC = () => {
     isSupabaseConnected,
     supabaseUrl,
     sessionAlertMsg,
-    setSessionAlertMsg
+    setSessionAlertMsg,
+    updateSupabaseConfig
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [targetCardCodes, setTargetCardCodes] = useState<string[]>([]);
+  const [setupCompleted, setSetupCompleted] = useState(() => {
+    return localStorage.getItem('cams_setup_completed') === 'true';
+  });
   const darkMode = false;
 
   React.useEffect(() => {
@@ -80,6 +86,22 @@ const MainAppContent: React.FC = () => {
       setActiveTab('dashboard');
     }
   }, [currentUser]);
+
+  // Show Supabase setup wizard if not configured and not already shown
+  const showSetupWizard = !setupCompleted && (!supabaseUrl || supabaseUrl === '' || supabaseUrl.includes('hvgkibbyqqreytwtcwwx'));
+
+  if (showSetupWizard) {
+    return (
+      <SupabaseSetup 
+        language={language}
+        onComplete={(url, key) => {
+          updateSupabaseConfig(url, key);
+          setSetupCompleted(true);
+          localStorage.setItem('cams_setup_completed', 'true');
+        }}
+      />
+    );
+  }
 
   if (!currentUser) {
     return <Login />;
@@ -179,6 +201,11 @@ const MainAppContent: React.FC = () => {
         {/* Dynamic header options */}
         <div className="flex items-center gap-3">
           
+          {/* Real-time Sync Status (Cross-device indicator) */}
+          <div className="hidden lg:block">
+            <RealtimeSyncStatus language={language} />
+          </div>
+
           {/* Active Connection state indicator */}
           <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-150 dark:border-slate-700 text-[10px] font-bold transition-all shrink-0">
             {isOnline ? (
