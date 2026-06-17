@@ -4,7 +4,7 @@ import { Users, UserCheck, UserMinus, Percent, Award, Calendar, BarChart3, Chevr
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
 
 export const Dashboard: React.FC = () => {
-  const { members, events, choirs, t, language } = useApp();
+  const { members, events, choirs, t, language, isUsingCustomConfigOverride, resetDatabaseToEnv } = useApp();
   const [selectedChoirId, setSelectedChoirId] = useState<string>('all');
 
   // Filter members and events by chosen department/choir
@@ -195,6 +195,31 @@ export const Dashboard: React.FC = () => {
         </div>
 
       </div>
+
+      {isUsingCustomConfigOverride && (
+        <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm animate-[fadeIn_0.2s_ease-out]">
+          <div className="space-y-1">
+            <h4 className="font-bold text-amber-900 text-xs flex items-center gap-1.5">
+              <span>⚠️</span>
+              {language === 'ar' ? 'تنبيه: أنت متصل بقاعدة بيانات مخصصة ومستقلة!' : 'Caution: Custom Stored Database Active!'}
+            </h4>
+            <p className="text-amber-800 text-[11px] leading-relaxed">
+              {language === 'ar'
+                ? 'جهازك يستعمل إعدادات اتصال قديمة أو مخصصة ومحفوظة محلياً. لمزامنة حضور هذا الجهاز فوراً مع اللابتوب وسائر أجهزة الخدام على السيرفر الرئيسي الجديد:'
+                : 'This phone/browser is overriding connection settings locally. To immediately sync attendance with laptops and other mobile devices onto the new active system database:'}
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              resetDatabaseToEnv();
+              alert(language === 'ar' ? '🔄 تم تصفير الكاش وإعادة المزامنة مع السيرفر الرئيسي!' : '🔄 Cache cleared and synchronized with the primary database successfully!');
+            }}
+            className="cursor-pointer whitespace-nowrap bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] uppercase tracking-wider px-3.5 py-2 rounded-lg transition-colors shadow-xs shrink-0 self-end sm:self-auto animate-pulse"
+          >
+            {language === 'ar' ? 'مزامنة مع السيرفر الرئيسي 🔄' : 'Sync Server Defaults 🔄'}
+          </button>
+        </div>
+      )}
 
       {/* Grid: 4 Core Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

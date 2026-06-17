@@ -55,6 +55,8 @@ interface AppContextType {
   isSupabaseConnected: boolean;
   supabaseError: string | null;
   updateSupabaseConfig: (url: string, key: string) => void;
+  isUsingCustomConfigOverride: boolean;
+  resetDatabaseToEnv: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -109,17 +111,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [supabaseError, setSupabaseError] = useState<string | null>(null);
   const [syncTrigger, setSyncTrigger] = useState<number>(0);
 
+  const [isUsingCustomConfigOverride, setIsUsingCustomConfigOverride] = useState<boolean>(() => {
+    return !!(localStorage.getItem('cams_supabase_url') || localStorage.getItem('cams_supabase_anon_key'));
+  });
+
   const updateSupabaseConfig = (url: string, key: string) => {
     const cleanedUrl = cleanSupabaseUrl(url);
     const cleanedKey = key.trim();
-    localStorage.setItem('cams_supabase_url', cleanedUrl);
-    localStorage.setItem('cams_supabase_anon_key', cleanedKey);
-    setSupabaseUrl(cleanedUrl);
-    setSupabaseAnonKey(cleanedKey);
+    if (cleanedUrl && cleanedKey) {
+      localStorage.setItem('cams_supabase_url', cleanedUrl);
+      localStorage.setItem('cams_supabase_anon_key', cleanedKey);
+      setIsUsingCustomConfigOverride(true);
+      setSupabaseUrl(cleanedUrl);
+      setSupabaseAnonKey(cleanedKey);
+    } else {
+      localStorage.removeItem('cams_supabase_url');
+      localStorage.removeItem('cams_supabase_anon_key');
+      setIsUsingCustomConfigOverride(false);
+      const creds = getSupabaseCredentials();
+      setSupabaseUrl(creds.url);
+      setSupabaseAnonKey(creds.key);
+    }
     resetSupabaseClient();
     setIsSupabaseConnected(false);
     setSupabaseError(null);
     // Trigger real-time synchronization re-run
+    setSyncTrigger(prev => prev + 1);
+  };
+
+  const resetDatabaseToEnv = () => {
+    localStorage.removeItem('cams_supabase_url');
+    localStorage.removeItem('cams_supabase_anon_key');
+    setIsUsingCustomConfigOverride(false);
+    
+    const creds = getSupabaseCredentials();
+    setSupabaseUrl(creds.url);
+    setSupabaseAnonKey(creds.key);
+    resetSupabaseClient();
+    setIsSupabaseConnected(false);
+    setSupabaseError(null);
     setSyncTrigger(prev => prev + 1);
   };
 
@@ -227,7 +257,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('cams_org_name', name);
     const client = getSupabaseClient() as any;
     if (client) {
-      client.from('settings').upsert({ id: 'config', orgName: name, logoUrl }).catch(console.error);
+      Promise.resolve(client.from('settings').upsert({ id: 'config', orgName: name, logoUrl })).catch(console.error);
     }
   };
   const setLogoUrl = (url: string) => {
@@ -235,7 +265,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('cams_logo_url', url);
     const client = getSupabaseClient() as any;
     if (client) {
-      client.from('settings').upsert({ id: 'config', orgName, logoUrl: url }).catch(console.error);
+      Promise.resolve(client.from('settings').upsert({ id: 'config', orgName, logoUrl: url })).catch(console.error);
     }
   };
 
@@ -280,29 +310,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           { id: 'usr-admin2', name: 'Eng. Amgad Adly', email: 'amgad@churchdiocese.org', role: 'admin', password: 'admin', organizationId: 'org-stmary', status: 'active' },
           { id: 'usr-officer1', name: 'Peter Mansour', email: 'peter.m@diocesestaff.org', role: 'officer', password: 'officer', organizationId: 'org-stmary', choirId: 'sub-stmary-choir1', status: 'active' }
         ];
-        await client.from('admins').upsert(initialAdmins).catch(console.error);
+        await Promise.resolve(client.from('admins').upsert(initialAdmins)).catch(console.error);
 
         // 2. Seed organizations
-        await client.from('organizations').upsert(INITIAL_ORGANIZATIONS).catch(console.error);
+        await Promise.resolve(client.from('organizations').upsert(INITIAL_ORGANIZATIONS)).catch(console.error);
 
         // 3. Seed churches
-        await client.from('churches').upsert(INITIAL_CHURCHES).catch(console.error);
+        await Promise.resolve(client.from('churches').upsert(INITIAL_CHURCHES)).catch(console.error);
 
         // 4. Seed choirs
-        await client.from('choirs').upsert(INITIAL_CHOIRS).catch(console.error);
+        await Promise.resolve(client.from('choirs').upsert(INITIAL_CHOIRS)).catch(console.error);
 
         // 5. Seed members
-        await client.from('members').upsert(INITIAL_MEMBERS).catch(console.error);
+        await Promise.resolve(client.from('members').upsert(INITIAL_MEMBERS)).catch(console.error);
 
         // 6. Seed events
-        await client.from('events').upsert(INITIAL_EVENTS).catch(console.error);
+        await Promise.resolve(client.from('events').upsert(INITIAL_EVENTS)).catch(console.error);
 
         // 7. Seed Settings config
-        await client.from('settings').upsert({
+        await Promise.resolve(client.from('settings').upsert({
           id: 'config',
           orgName: 'St. Mary of Angels Diocese',
           logoUrl: 'https://images.unsplash.com/photo-1548625361-155de0cbb565?w=150&q=80'
-        }).catch(console.error);
+        })).catch(console.error);
 
         console.log('Supabase demo data seeded successfully!');
       }
@@ -565,7 +595,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const client = getSupabaseClient() as any;
       if (client) {
         const staleIds = staleEvents.map(e => e.id);
-        client.from('events').delete().in('id', staleIds).catch(console.error);
+        Promise.resolve(client.from('events').delete().in('id', staleIds)).catch(console.error);
       }
     }
   }, [members]);
@@ -600,7 +630,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const client = getSupabaseClient() as any;
     if (client) {
-      client.from('members').insert([newMember]).catch((err: any) => {
+      Promise.resolve(client.from('members').insert([newMember])).catch((err: any) => {
         console.error('Error uploading new member to Supabase:', err);
       });
     }
@@ -614,7 +644,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const client = getSupabaseClient() as any;
     if (client) {
-      client.from('members').upsert([updated]).catch((err: any) => {
+      Promise.resolve(client.from('members').upsert([updated])).catch((err: any) => {
         console.error('Error updating member in Supabase:', err);
       });
     }
@@ -630,10 +660,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const client = getSupabaseClient() as any;
     if (client) {
-      client.from('members').delete().in('id', ids).catch((err: any) => {
+      Promise.resolve(client.from('members').delete().in('id', ids)).catch((err: any) => {
         console.error('Error deleting members from Supabase:', err);
       });
-      client.from('events').delete().in('memberCode', codesToDelete).catch((err: any) => {
+      Promise.resolve(client.from('events').delete().in('memberCode', codesToDelete)).catch((err: any) => {
         console.error('Error deleting associated member events from Supabase:', err);
       });
     }
@@ -652,7 +682,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const client = getSupabaseClient() as any;
     if (client) {
-      client.from('members').upsert(incomingMembers).catch((err: any) => {
+      Promise.resolve(client.from('members').upsert(incomingMembers)).catch((err: any) => {
         console.error('Error bulk uploading members inside Supabase:', err);
       });
     }
@@ -711,7 +741,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const client = getSupabaseClient() as any;
     if (client) {
-      client.from('events').insert([newEvent]).catch((err: any) => {
+      Promise.resolve(client.from('events').insert([newEvent])).catch((err: any) => {
         console.error('Error saving checkin scan to Supabase:', err);
       });
     }
@@ -750,7 +780,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setEvents(prev => [...newEvents, ...prev]);
       const client = getSupabaseClient() as any;
       if (client) {
-        client.from('events').insert(newEvents).catch((err: any) => {
+        Promise.resolve(client.from('events').insert(newEvents)).catch((err: any) => {
           console.error('Error uploading offline scan queue list to Supabase:', err);
         });
       }
@@ -762,7 +792,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setEvents([]);
     const client = getSupabaseClient() as any;
     if (client) {
-      client.from('events').delete().neq('id', 'placeholder').catch((err: any) => {
+      Promise.resolve(client.from('events').delete().neq('id', 'placeholder')).catch((err: any) => {
         console.error('Error emptying events in Supabase:', err);
       });
     }
@@ -772,7 +802,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setEvents(prev => prev.filter(e => e.id !== id));
     const client = getSupabaseClient() as any;
     if (client) {
-      client.from('events').delete().eq('id', id).catch((err: any) => {
+      Promise.resolve(client.from('events').delete().eq('id', id)).catch((err: any) => {
         console.error('Error removing event in Supabase:', err);
       });
     }
@@ -795,7 +825,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const client = getSupabaseClient() as any;
     if (client) {
-      client.from('admins').insert([newAdmin]).catch((err: any) => {
+      Promise.resolve(client.from('admins').insert([newAdmin])).catch((err: any) => {
         console.error('Error saving provisioned admin admin to Supabase:', err);
       });
     }
@@ -805,7 +835,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAdmins(prev => prev.filter(a => a.id !== id));
     const client = getSupabaseClient() as any;
     if (client) {
-      client.from('admins').delete().eq('id', id).catch((err: any) => {
+      Promise.resolve(client.from('admins').delete().eq('id', id)).catch((err: any) => {
         console.error('Error revoking admin account in Supabase:', err);
       });
     }
@@ -820,7 +850,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const client = getSupabaseClient() as any;
     if (client) {
-      client.from('admins').upsert([updated]).catch((err: any) => {
+      Promise.resolve(client.from('admins').upsert([updated])).catch((err: any) => {
         console.error('Error saving updated admin credentials to Supabase:', err);
       });
     }
@@ -863,7 +893,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       supabaseAnonKey,
       isSupabaseConnected,
       supabaseError,
-      updateSupabaseConfig
+      updateSupabaseConfig,
+      isUsingCustomConfigOverride,
+      resetDatabaseToEnv
     }}>
       {children}
     </AppContext.Provider>

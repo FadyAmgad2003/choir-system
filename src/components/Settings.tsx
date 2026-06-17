@@ -16,7 +16,9 @@ export const Settings: React.FC = () => {
     supabaseAnonKey,
     isSupabaseConnected,
     supabaseError,
-    updateSupabaseConfig
+    updateSupabaseConfig,
+    isUsingCustomConfigOverride,
+    resetDatabaseToEnv
   } = useApp();
 
   const [localOrgName, setLocalOrgName] = useState(orgName);
@@ -433,7 +435,7 @@ alter table public.settings disable row level security;
             </div>
 
             {/* Quick action triggers */}
-            <div className="flex gap-3 pt-2">
+            <div className="flex flex-wrap gap-3 pt-2">
               <button
                 type="submit"
                 className="cursor-pointer px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-md shadow-emerald-50 transition-all flex items-center gap-1.5"
@@ -442,7 +444,21 @@ alter table public.settings disable row level security;
                 {language === 'ar' ? 'ربط وتفعيل المزامنة' : 'Connect & Sync Real-Time'}
               </button>
 
-              {(dbUrl || dbKey) && (
+              {isUsingCustomConfigOverride ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetDatabaseToEnv();
+                    setDbUrl('');
+                    setDbKey('');
+                    setDbSuccessMsg(language === 'ar' ? '🔄 تم استعادة الإعدادات الافتراضية للسيرفر ومزامنتها بنجاح!' : '🔄 Server defaults restored & synchronized successfully!');
+                    setTimeout(() => setDbSuccessMsg(''), 4000);
+                  }}
+                  className="cursor-pointer px-4 py-2.5 border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
+                >
+                  {language === 'ar' ? 'استعادة الافتراضي للسيرفر 🔄' : 'Restore Server Defaults 🔄'}
+                </button>
+              ) : (dbUrl || dbKey) ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -456,7 +472,7 @@ alter table public.settings disable row level security;
                 >
                   {language === 'ar' ? 'قطع الاتصال' : 'Disconnect'}
                 </button>
-              )}
+              ) : null}
             </div>
 
             {/* Shared QR Code Sync Bridge */}
