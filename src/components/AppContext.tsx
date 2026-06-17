@@ -209,9 +209,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const client = getSupabaseClient() as any;
     if (!client) return;
 
-    // Restore any existing session on load
+    // Restore any existing session on load safely and helper local clearing
     (async () => {
       const { data: { session } } = await client.auth.getSession();
+      const wasAuthSynced = localStorage.getItem('cams_session_auth_sync') === 'true';
       if (session?.user) {
         const account = resolveUserAccount(session.user.email ?? '', session.user.id);
         if (account) {
@@ -219,10 +220,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           localStorage.setItem('cams_session', JSON.stringify(account));
           localStorage.setItem('cams_session_auth_sync', 'true');
         }
+      } else if (wasAuthSynced) {
+        // Only clear if we were previously using Supabase Auth (wasAuthSynced is true)
+        // AND the asynchronous session checking has finished and returned null (meaning they are indeed logged out).
+        setCurrentUser(null);
+        localStorage.removeItem('cams_session');
+        localStorage.removeItem('cams_session_auth_sync');
       }
     })();
 
-    // Listen for future sign-in / sign-out events
+    // Listen for future sign-in / sign-out events (skip INITIAL_SESSION which contains raw racing null values)
     const { data: { subscription } } = client.auth.onAuthStateChange(
       (event: string, session: any) => {
         const wasAuthSynced = localStorage.getItem('cams_session_auth_sync') === 'true';
@@ -234,14 +241,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             localStorage.setItem('cams_session_auth_sync', 'true');
           }
         } else if (event === 'SIGNED_OUT') {
-          if (wasAuthSynced) {
-            setCurrentUser(null);
-            localStorage.removeItem('cams_session');
-            localStorage.removeItem('cams_session_auth_sync');
-          }
-        } else if (event === 'INITIAL_SESSION') {
-          // If we had a Supabase OAuth/Auth session on a previous boot but now it loads as null, safely clear.
-          // Otherwise, if they logged in locally via Local/DB credentials fallback (like Fady's case), do NOT log them out.
           if (wasAuthSynced) {
             setCurrentUser(null);
             localStorage.removeItem('cams_session');
@@ -440,6 +439,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Supabase Data Seeding (Fired if table records are completely empty)
   const seedSupabaseIfEmpty = async (client: any) => {
     try {
+      const { url: currentUrl } = getSupabaseCredentials();
+      const isDefaultFallbackDb = (currentUrl || '').includes('hvgkibbyqqreytwtcwwx');
+      if (!isDefaultFallbackDb) {
+        console.log('Custom project database detected. Bypassing automatic demo data seeding.');
+        return;
+      }
+
       console.log('Seeding Supabase with initial demo data...');
 
       const { data: adminCheck } = await client.from('admins').select('id').limit(1);
@@ -473,6 +479,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetchSuccessRef.current = false;
       setSupabaseError(null);
+
+      const { url: currentUrl } = getSupabaseCredentials();
+      const isDefaultFallbackDb = (currentUrl || '').includes('hvgkibbyqqreytwtcwwx');
 
       const { data: testData, error: testError } = await client.from('settings').select('id').limit(1) as any;
       if (testError) {
@@ -514,9 +523,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const { data: adminsData, error: adminsError } = await client.from('admins').select('*') as any;
       if (!adminsError && adminsData) {
         if (adminsData.length === 0) {
-          await seedSupabaseIfEmpty(client);
-          const { data: refetchedAdmins } = await client.from('admins').select('*') as any;
-          if (refetchedAdmins) setAdmins(refetchedAdmins);
+          if (isDefaultFallbackDb) {
+            await seedSupabaseIfEmpty(client);
+            const { data: refetchedAdmins } = await client.from('admins').select('*') as any;
+            if (refetchedAdmins) setAdmins(refetchedAdmins);
+          } else if (admins.length > 0) {
+            // Upload current local admins to custom database so administrators don't get deleted
+            await Promise.resolve(client.from('admins').upsert(admins)).catch(console.error);
+          }
         } else {
           setAdmins(adminsData);
           localStorage.setItem('cams_admins', JSON.stringify(adminsData));
