@@ -181,6 +181,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const adminsRef = useRef<UserAccount[]>(admins);
   useEffect(() => { adminsRef.current = admins; }, [admins]);
 
+  // Track if initial fetch completed to avoid blind connection status overwrite
+  const fetchSuccessRef = useRef(false);
+
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
     const cached = localStorage.getItem('cams_session');
     if (cached) return JSON.parse(cached);
@@ -222,6 +225,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Listen for future sign-in / sign-out events
     const { data: { subscription } } = client.auth.onAuthStateChange(
       (event: string, session: any) => {
+        const wasAuthSynced = localStorage.getItem('cams_session_auth_sync') === 'true';
         if (session?.user) {
           const account = resolveUserAccount(session.user.email ?? '', session.user.id);
           if (account) {
@@ -230,13 +234,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             localStorage.setItem('cams_session_auth_sync', 'true');
           }
         } else if (event === 'SIGNED_OUT') {
-          setCurrentUser(null);
-          localStorage.removeItem('cams_session');
-          localStorage.removeItem('cams_session_auth_sync');
+          if (wasAuthSynced) {
+            setCurrentUser(null);
+            localStorage.removeItem('cams_session');
+            localStorage.removeItem('cams_session_auth_sync');
+          }
         } else if (event === 'INITIAL_SESSION') {
           // If we had a Supabase OAuth/Auth session on a previous boot but now it loads as null, safely clear.
           // Otherwise, if they logged in locally via Local/DB credentials fallback (like Fady's case), do NOT log them out.
-          const wasAuthSynced = localStorage.getItem('cams_session_auth_sync') === 'true';
           if (wasAuthSynced) {
             setCurrentUser(null);
             localStorage.removeItem('cams_session');
@@ -466,6 +471,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const fetchInitialData = async (client: any) => {
     try {
+      fetchSuccessRef.current = false;
       setSupabaseError(null);
 
       const { data: testData, error: testError } = await client.from('settings').select('id').limit(1) as any;
@@ -496,6 +502,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setLogoUrlState(settingsData.logoUrl);
           localStorage.setItem('cams_logo_url', settingsData.logoUrl);
         }
+      } else if (!settingsError && !settingsData) {
+        // If empty remote settings, upload local settings
+        await Promise.resolve(client.from('settings').upsert({
+          id: 'config',
+          orgName,
+          logoUrl
+        })).catch(console.error);
       }
 
       const { data: adminsData, error: adminsError } = await client.from('admins').select('*') as any;
@@ -512,39 +525,66 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const { data: orgsData, error: orgsError } = await client.from('organizations').select('*') as any;
       if (!orgsError && orgsData) {
-        setOrganizations(orgsData);
-        localStorage.setItem('cams_orgs', JSON.stringify(orgsData));
+        if (orgsData.length === 0 && organizations.length > 0) {
+          // Remote is empty: upload local offline organizations so they are not deleted
+          await Promise.resolve(client.from('organizations').upsert(organizations)).catch(console.error);
+        } else {
+          setOrganizations(orgsData);
+          localStorage.setItem('cams_orgs', JSON.stringify(orgsData));
+        }
       }
 
       const { data: churchesData, error: churchesError } = await client.from('churches').select('*') as any;
       if (!churchesError && churchesData) {
-        setChurches(churchesData);
-        localStorage.setItem('cams_churches', JSON.stringify(churchesData));
+        if (churchesData.length === 0 && churches.length > 0) {
+          // Remote is empty: upload local offline churches so they are not deleted
+          await Promise.resolve(client.from('churches').upsert(churches)).catch(console.error);
+        } else {
+          setChurches(churchesData);
+          localStorage.setItem('cams_churches', JSON.stringify(churchesData));
+        }
       }
 
       const { data: choirsData, error: choirsError } = await client.from('choirs').select('*') as any;
       if (!choirsError && choirsData) {
-        setChoirs(choirsData);
-        localStorage.setItem('cams_choirs', JSON.stringify(choirsData));
+        if (choirsData.length === 0 && choirs.length > 0) {
+          // Remote is empty: upload local offline music choirs so they are not deleted
+          await Promise.resolve(client.from('choirs').upsert(choirs)).catch(console.error);
+        } else {
+          setChoirs(choirsData);
+          localStorage.setItem('cams_choirs', JSON.stringify(choirsData));
+        }
       }
 
       const { data: membersData, error: membersError } = await client.from('members').select('*') as any;
       if (!membersError && membersData) {
-        const sorted = [...membersData].sort((a, b) => b.id.localeCompare(a.id));
-        setMembers(sorted);
-        localStorage.setItem('cams_members', JSON.stringify(sorted));
+        if (membersData.length === 0 && members.length > 0) {
+          // Remote is empty: upload local directories so we preserve user data
+          await Promise.resolve(client.from('members').upsert(members)).catch(console.error);
+        } else {
+          const sorted = [...membersData].sort((a, b) => b.id.localeCompare(a.id));
+          setMembers(sorted);
+          localStorage.setItem('cams_members', JSON.stringify(sorted));
+        }
       }
 
       const { data: eventsData, error: eventsError } = await client.from('events').select('*') as any;
       if (!eventsError && eventsData) {
-        const sorted = [...eventsData].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-        setEvents(sorted);
-        localStorage.setItem('cams_events', JSON.stringify(sorted));
+        if (eventsData.length === 0 && events.length > 0) {
+          // Remote is empty: upload local scans so they sync up to live DB
+          await Promise.resolve(client.from('events').upsert(events)).catch(console.error);
+        } else {
+          const sorted = [...eventsData].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+          setEvents(sorted);
+          localStorage.setItem('cams_events', JSON.stringify(sorted));
+        }
       }
 
       setSupabaseError(null);
+      fetchSuccessRef.current = true;
       setIsSupabaseConnected(true);
     } catch (err: any) {
+      fetchSuccessRef.current = false;
       console.error('Supabase initial fetch failed:', err);
       const errMsg = err?.message || String(err);
       if (errMsg.includes('Failed to fetch') || errMsg.includes('fetch')) {
@@ -666,7 +706,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
       .subscribe((status: string) => {
         console.log('Supabase real-time pubsub status:', status);
-        if (status === 'SUBSCRIBED') {
+        if (status === 'SUBSCRIBED' && fetchSuccessRef.current) {
           setIsSupabaseConnected(true);
         }
       });
