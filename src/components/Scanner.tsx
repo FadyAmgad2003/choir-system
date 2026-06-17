@@ -28,31 +28,63 @@ export const Scanner: React.FC = () => {
 
   // Simulated & Actual scan triggers
   const handleSimulateScan = (code: string) => {
-    // 1. Intercept Supabase configuration sync QR instead of a parishioner check-in ID badge
-    if (code.trim().startsWith('cams_config:')) {
+    const trimmedCode = code.trim();
+    
+    // Check if it is a sync URL or JSON string
+    let isSyncConfig = false;
+    let syncUrl = '';
+    let syncKey = '';
+    
+    if (trimmedCode.startsWith('cams_config:')) {
       try {
-        const jsonStr = code.trim().substring('cams_config:'.length);
+        const jsonStr = trimmedCode.substring('cams_config:'.length);
         const config = JSON.parse(jsonStr);
         if (config.url && config.key) {
-          updateSupabaseConfig(config.url, config.key);
-          setScanResult({
-            success: true,
-            message: language === 'ar' 
-              ? '⚡ تم الربط المباشر ومزامنة إعدادات قاعدة البيانات بنجاح في اللحظة نفسها!' 
-              : '⚡ Cloud Link Activated! Supabase credentials synced and linked successfully.'
-          });
-          setLastScannedName(language === 'ar' ? 'مزامنة السحابية وتكامل الأجهزة' : 'Cloud Sync Link');
-          setLastScannedCode('SUCCESS');
-          
-          // Clear alert after 4 seconds
-          setTimeout(() => {
-            setScanResult(null);
-          }, 4000);
-          return;
+          isSyncConfig = true;
+          syncUrl = config.url;
+          syncKey = config.key;
         }
       } catch (err) {
-        console.error('Failed to parse synchronized QR configuration:', err);
+        console.error('Failed to parse synchronized QR JSON config:', err);
       }
+    } else if (trimmedCode.includes('sync_url=') && trimmedCode.includes('sync_key=')) {
+      try {
+        const urlParams = new URL(trimmedCode).searchParams;
+        const u = urlParams.get('sync_url');
+        const k = urlParams.get('sync_key');
+        if (u && k) {
+          isSyncConfig = true;
+          syncUrl = u;
+          syncKey = k;
+        }
+      } catch (err) {
+        // Fallback simple regex matching if URL class parsing fails on relative/sandboxed paths
+        const matchUrl = trimmedCode.match(/[?&]sync_url=([^&]+)/);
+        const matchKey = trimmedCode.match(/[?&]sync_key=([^&]+)/);
+        if (matchUrl && matchKey) {
+          isSyncConfig = true;
+          syncUrl = decodeURIComponent(matchUrl[1]);
+          syncKey = decodeURIComponent(matchKey[1]);
+        }
+      }
+    }
+
+    if (isSyncConfig && syncUrl && syncKey) {
+      updateSupabaseConfig(syncUrl, syncKey);
+      setScanResult({
+        success: true,
+        message: language === 'ar' 
+          ? '⚡ تم الربط المباشر ومزامنة إعدادات قاعدة البيانات بنجاح في اللحظة نفسها!' 
+          : '⚡ Cloud Link Activated! Supabase credentials synced and linked successfully.'
+      });
+      setLastScannedName(language === 'ar' ? 'مزامنة السحابية وتكامل الأجهزة' : 'Cloud Sync Link');
+      setLastScannedCode('SUCCESS');
+      
+      // Clear alert after 4 seconds
+      setTimeout(() => {
+        setScanResult(null);
+      }, 4000);
+      return;
     }
 
     const cleanCode = code.trim().toUpperCase();

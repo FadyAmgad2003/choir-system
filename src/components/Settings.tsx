@@ -155,8 +155,27 @@ alter table public.members replica identity full;
 alter table public.events replica identity full;
 alter table public.settings replica identity full;
 
-drop publication if exists supabase_realtime;
-create publication supabase_realtime for table 
+-- Safe, error-tolerant way to add tables to publication if not already present
+do $$
+begin
+  -- Ensure publication exists
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    create publication supabase_realtime;
+  end if;
+end $$;
+
+-- Drop specific tables from publication first to avoid "already member" errors on repeat runs
+alter publication supabase_realtime drop table if exists
+  public.organizations, 
+  public.churches, 
+  public.choirs, 
+  public.admins, 
+  public.members, 
+  public.events, 
+  public.settings;
+
+-- Add all tables securely to the database publication
+alter publication supabase_realtime add table 
   public.organizations, 
   public.churches, 
   public.choirs, 
@@ -182,6 +201,8 @@ alter table public.settings disable row level security;
       setIsCopied(false);
     }, 2000);
   };
+
+  const syncShareUrl = `${window.location.origin}${window.location.pathname}?sync_url=${encodeURIComponent(supabaseUrl)}&sync_key=${encodeURIComponent(supabaseAnonKey)}`;
 
   return (
     <div className="space-y-6" id="settings-view-form">
@@ -472,7 +493,7 @@ alter table public.settings disable row level security;
               <div className="mt-5 pt-5 border-t border-slate-100 flex flex-col md:flex-row items-center gap-4 bg-slate-50/50 p-4 rounded-xl border border-slate-200/40">
                 <div className="shrink-0 bg-white p-2.5 rounded-lg shadow-sm border border-slate-200">
                   <QRCodeImage 
-                    text={`cams_config:${JSON.stringify({ url: supabaseUrl, key: supabaseAnonKey })}`}
+                    text={syncShareUrl}
                     size={110} 
                   />
                 </div>

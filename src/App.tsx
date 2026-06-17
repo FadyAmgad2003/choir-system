@@ -47,7 +47,11 @@ const MainAppContent: React.FC = () => {
     setIsOnline, 
     offlineQueue, 
     t,
-    logout
+    logout,
+    isSupabaseConnected,
+    supabaseUrl,
+    sessionAlertMsg,
+    setSessionAlertMsg
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -133,6 +137,25 @@ const MainAppContent: React.FC = () => {
   return (
     <div className={`min-h-screen bg-white dark:bg-slate-950 flex flex-col ${rtlClass} text-slate-900 dark:text-slate-100 transition-colors duration-200`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
       
+      {/* Dynamic Sync Alert Notifications */}
+      {sessionAlertMsg && (
+        <div className="fixed top-4 right-4 z-[9999] max-w-sm bg-emerald-600 text-white rounded-xl shadow-xl border border-emerald-500 p-4 shrink-0 flex items-start gap-3 my-4 animate-pulse">
+          <div className="h-6 w-6 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+            <Signal className="h-3.5 w-3.5 text-white animate-bounce" />
+          </div>
+          <div className="flex-1">
+            <p className="text-[11px] font-bold leading-relaxed">{sessionAlertMsg}</p>
+          </div>
+          <button 
+            type="button" 
+            onClick={() => setSessionAlertMsg(null)}
+            className="text-white/80 hover:text-white cursor-pointer hover:bg-white/10 rounded p-1 transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* 1. Global Header with Impersonator Panel and Language Dialect Swaps */}
       <header className="sticky top-0 z-40 h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-sm px-6 flex items-center justify-between transition-colors duration-200">
         
@@ -157,16 +180,29 @@ const MainAppContent: React.FC = () => {
         <div className="flex items-center gap-3">
           
           {/* Active Connection state indicator */}
-          <div className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-50 dark:bg-slate-800 border border-slate-150 dark:border-slate-700 text-[10px] font-semibold text-slate-700 dark:text-slate-300 transition-colors">
+          <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-150 dark:border-slate-700 text-[10px] font-bold transition-all shrink-0">
             {isOnline ? (
-              <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 translate-y-0.5">
-                <Signal className="h-3.5 w-3.5" />
-                {t.activeConnection}
-              </span>
+              isSupabaseConnected ? (
+                <span className="text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <Signal className="h-3.5 w-3.5 shrink-0 text-emerald-650" />
+                  <span>{language === 'ar' ? 'رابط نشط مباشر ⚡' : 'REALTIME LIVE ⚡'}</span>
+                  {supabaseUrl && !supabaseUrl.includes('hvgkibbyqqreytwtcwwx') && (
+                    <span className="bg-indigo-50 border border-indigo-200 text-indigo-700 dark:bg-slate-800 dark:text-indigo-400 px-1 rounded text-[8px] uppercase font-bold">Custom DB</span>
+                  )}
+                </span>
+              ) : (
+                <span className="text-slate-600 dark:text-slate-450 flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  <Signal className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                  <span>{language === 'ar' ? 'متصل (نمط محلي)' : 'Local Mode (Active)'}</span>
+                </span>
+              )
             ) : (
-              <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1 translate-y-0.5">
-                <SignalZero className="h-3.5 w-3.5" />
-                {offlineQueue.length} {language === 'ar' ? 'حركات معلقة' : 'cached'}
+              <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-550" />
+                <SignalZero className="h-3.5 w-3.5 shrink-0" />
+                <span>{offlineQueue.length} {language === 'ar' ? 'حركات معلقة' : 'cached'}</span>
               </span>
             )}
           </div>

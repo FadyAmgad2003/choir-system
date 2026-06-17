@@ -55,6 +55,8 @@ interface AppContextType {
   isSupabaseConnected: boolean;
   supabaseError: string | null;
   updateSupabaseConfig: (url: string, key: string) => void;
+  sessionAlertMsg: string | null;
+  setSessionAlertMsg: (msg: string | null) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -76,8 +78,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const [sessionAlertMsg, setSessionAlertMsg] = useState<string | null>(() => {
+    const msg = localStorage.getItem('cams_sync_alert_message');
+    if (msg) {
+      localStorage.removeItem('cams_sync_alert_message');
+      return msg;
+    }
+    return null;
+  });
+
   useEffect(() => {
     setLanguage(language);
+    
+    // Check for URL query params to sync credentials across mobile and laptop devices
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const syncUrl = searchParams.get('sync_url');
+      const syncKey = searchParams.get('sync_key');
+      if (syncUrl && syncKey) {
+        const cleanedUrl = cleanSupabaseUrl(syncUrl);
+        const cleanedKey = syncKey.trim();
+        localStorage.setItem('cams_supabase_url', cleanedUrl);
+        localStorage.setItem('cams_supabase_anon_key', cleanedKey);
+        
+        // Save alert message to show after reload
+        const msg = language === 'ar'
+          ? '⚡ تم الربط المباشر ومزامنة إعدادات قاعدة البيانات بنجاح!'
+          : '⚡ Database credentials imported from link and connected in real-time!';
+        localStorage.setItem('cams_sync_alert_message', msg);
+        
+        // Clear query parameters
+        const cleanUrl = window.location.origin + window.location.pathname;
+        window.history.replaceState({}, document.title, cleanUrl);
+        window.location.reload();
+      }
+    } catch (e) {
+      console.error('Failed to parse sync query parameters:', e);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -931,7 +968,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       supabaseAnonKey,
       isSupabaseConnected,
       supabaseError,
-      updateSupabaseConfig
+      updateSupabaseConfig,
+      sessionAlertMsg,
+      setSessionAlertMsg
     }}>
       {children}
     </AppContext.Provider>
