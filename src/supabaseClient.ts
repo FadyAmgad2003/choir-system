@@ -21,14 +21,17 @@ export function cleanSupabaseUrl(url: string): string {
 
 // Retrieve credentials from environment variables or custom localStorage inputs
 export function getSupabaseCredentials() {
+  const fallbackUrl = 'https://hvgkibbyqqreytwtcwwx.supabase.co';
+  const fallbackKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh2Z2tpYmJ5cXFyZXl0d3Rjd3d4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MDYyMDksImV4cCI6MjA5NzI4MjIwOX0.dEDuqe1jGK4NHJ0c-grO5s6JRvkWQLth4qgZkr2ahI0';
+
   const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL;
   const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
 
   const localUrl = localStorage.getItem('cams_supabase_url');
   const localKey = localStorage.getItem('cams_supabase_anon_key');
 
-  const url = cleanSupabaseUrl(localUrl || envUrl || '');
-  const key = (localKey || envKey || '').trim();
+  const url = cleanSupabaseUrl(localUrl || envUrl || fallbackUrl);
+  const key = (localKey || envKey || fallbackKey).trim();
 
   return { url, key };
 }
